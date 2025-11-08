@@ -1,0 +1,484 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "upwork-jobs",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "51ac0d3d-e671-4987-ba8e-9df3227f443a",
+      "name": "Webhook - Chrome Extension",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [
+        -1200,
+        208
+      ],
+      "webhookId": "upwork-chrome-scraper"
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {}
+      },
+      "id": "00956323-82d1-497e-8eb6-9d494cfbf701",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1776,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse incoming webhook data from Chrome extension\nconst webhookData = $input.first().json;\n\nlet jobs = [];\n\n// Handle different data structures from the extension\nif (Array.isArray(webhookData)) {\n  jobs = webhookData;\n} else if (webhookData.jobs && Array.isArray(webhookData.jobs)) {\n  jobs = webhookData.jobs;\n} else if (webhookData.body && Array.isArray(webhookData.body)) {\n  jobs = webhookData.body;\n} else {\n  // Single job object\n  jobs = [webhookData];\n}\n\nconsole.log(`Received ${jobs.length} jobs from Chrome extension`);\n\nif (jobs.length === 0) {\n  return [];\n}\n\n// Transform to standard format\nconst formattedJobs = jobs.map(job => ({\n  title: job.title || job.jobTitle || 'No title',\n  link: job.url || job.link || job.jobUrl || '',\n  posted: job.postedTime || job.posted || job.date || 'Recently posted',\n  budget: job.budget || job.price || 'See details',\n  description: job.description || job.snippet || 'Click link for details',\n  clientRating: job.clientRating || 'N/A',\n  jobType: job.jobType || job.type || 'N/A'\n}));\n\nreturn formattedJobs.map(job => ({ json: job }));"
+      },
+      "id": "6cd14015-a28b-4d9e-9976-7a5a3521771b",
+      "name": "Code - Parse Webhook Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -976,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "app11EF1n6NDYH55O",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "Jobs",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "f2ac4c15-5809-4947-930e-1efbdff12c74",
+      "name": "Airtable - Get All Records",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        -752,
+        208
+      ],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "domkLRIjkMr4fKEI",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const existingRecords = $('Airtable - Get All Records').all();\nconst existingLinks = existingRecords\n  .map(item => item.json.fields?.Link)\n  .filter(Boolean);\n\nconst allJobs = $('Code - Parse Webhook Data').all();\n\nconst newJobs = allJobs.filter(job => \n  job.json.link && !existingLinks.includes(job.json.link)\n);\n\nconsole.log(`Found ${allJobs.length} total jobs, ${newJobs.length} are new`);\n\nif (newJobs.length === 0) {\n  console.log('No new jobs found');\n  return [];\n}\n\nreturn newJobs;"
+      },
+      "id": "05faf89f-ff41-4df9-9738-7ea93cda584f",
+      "name": "Code - Filter Duplicates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -528,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.link }}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "4233ecee-6f4a-4479-8257-0874b79b4c0f",
+      "name": "IF - New Jobs Exist",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -320,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {
+          "temperature": 0.3
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        -48,
+        656
+      ],
+      "id": "5834ab76-a672-45af-99f0-aa94cd30be8e",
+      "name": "Groq Chat Model",
+      "credentials": {
+        "groqApi": {
+          "id": "hYPCAM1micxblCKE",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Analyze this Upwork job and return ONLY a valid JSON object with no extra text, no markdown, no code blocks.\n\nJob:\nTitle: {{ $('IF - New Jobs Exist').item.json.title }}\nBudget: {{ $('IF - New Jobs Exist').item.json.budget }}\nDescription: {{ $('IF - New Jobs Exist').item.json.description }}\n\nMy expertise:\n- n8n workflow design & optimization\n- API integrations (REST, GraphQL, webhooks)\n- Data transformation & processing\n- Automation architecture\n- JavaScript/Python for custom nodes\n- Database connections (Airtable, Google Sheets, SQL)\n\nScoring:\n- 9-10: Perfect n8n project, clear scope, good budget\n- 7-8: Good automation project, may need n8n\n- 5-6: Generic automation, unclear requirements\n- 1-4: Poor fit, low budget, red flags\n\nReturn ONLY this JSON structure:\n{\n  \"score\": 1-10,\n  \"reason\": \"Brief explanation\",\n  \"red_flags\": \"Any concerns or None\",\n  \"opportunity_type\": \"Quick Win or Long-term or Learning Opportunity\"\n}",
+        "options": {
+          "systemMessage": "You are a JSON-only response bot. Return ONLY valid JSON with no markdown, no code blocks, no extra text."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        -96,
+        448
+      ],
+      "id": "eba73985-a1ce-4272-b863-f3a8bf463735",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const job = $('IF - New Jobs Exist').item.json;\nconst aiResponse = $json;\n\nlet analysis;\ntry {\n  let content = aiResponse.output || aiResponse.text || aiResponse.message?.content || JSON.stringify(aiResponse);\n  \n  // Remove  tags and everything inside them\n  content = content.replace(/[\\s\\S]*?<\\/think>/g, '').trim();\n  \n  // Remove markdown code blocks\n  content = content.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\n  \n  // Try to parse\n  analysis = typeof content === 'string' ? JSON.parse(content) : content;\n  \n  console.log('✅ Successfully parsed AI response:', analysis);\n} catch (e) {\n  console.error('❌ Failed to parse AI response:', e);\n  console.error('Raw content:', aiResponse);\n  analysis = {\n    score: 5,\n    reason: \"Could not analyze - AI response parsing failed\",\n    red_flags: \"Analysis error\",\n    opportunity_type: \"Unknown\"\n  };\n}\n\nreturn {\n  json: {\n    Title: job.title,\n    Link: job.link,\n    Posted: job.posted,\n    Budget: job.budget,\n    Description: job.description,\n    Score: analysis.score || 5,\n    Reason: analysis.reason || \"No reason provided\",\n    Red_Flags: analysis.red_flags || \"None\",\n    Opportunity_Type: analysis.opportunity_type || \"Standard\",\n    Proposal_Draft: \"\"\n  }\n};"
+      },
+      "id": "2d6209a5-adba-4209-a21d-24cd8a8e377b",
+      "name": "Code - Merge Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        128,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "mode": "id",
+          "value": "app11EF1n6NDYH55O"
+        },
+        "table": {
+          "__rl": true,
+          "value": "Jobs",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {
+          "typecast": true
+        }
+      },
+      "id": "43045b7e-9310-4849-b03a-f74d32b971e5",
+      "name": "Airtable - Create Record",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        352,
+        208
+      ],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "domkLRIjkMr4fKEI",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.fields.Score }}",
+              "operation": "largerEqual",
+              "value2": 5
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f707378c-3356-4041-ab49-c809d0626294",
+      "name": "IF - High Priority",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        576,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {
+          "temperature": 0.7
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        928,
+        -336
+      ],
+      "id": "702bad47-bdf8-426e-b55a-79d987e41bed",
+      "name": "Groq Chat Model1",
+      "credentials": {
+        "groqApi": {
+          "id": "hYPCAM1micxblCKE",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Write a compelling 150-200 word Upwork proposal for this job. Return ONLY the proposal text with no extra formatting.\n\nJob: {{ $('IF - High Priority').item.json.fields.Title }}\nBudget: {{ $('IF - High Priority').item.json.fields.Budget }}\nDescription: {{ $('IF - High Priority').item.json.fields.Description }}\n\nRequirements:\n1. Show deep n8n expertise\n2. Mention specific n8n features (webhooks, API calls, data transformation, scheduling)\n3. Highlight automation experience\n4. Include clear call to action\n5. Professional, confident, solution-focused tone\n\nReturn ONLY the proposal text.",
+        "options": {
+          "systemMessage": "You are a professional proposal writer. Return only the proposal text with no extra commentary, no markdown formatting, no code blocks."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        800,
+        0
+      ],
+      "id": "72f2e00a-53e3-4785-a083-d8a374a1a03e",
+      "name": "AI Agent1"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const jobData = $('IF - High Priority').item.json.fields;\nconst recordId = $('IF - High Priority').item.json.id;\nconst aiResponse = $json;\n\nlet proposal = \"Proposal generation failed\";\n\ntry {\n  if (aiResponse.output) {\n    proposal = aiResponse.output;\n  } else if (aiResponse.text) {\n    proposal = aiResponse.text;\n  } else if (aiResponse.message?.content) {\n    proposal = aiResponse.message.content;\n  }\n  \n  // Clean up any markdown or extra formatting\n  proposal = proposal.replace(/```[\\s\\S]*?```/g, '').trim();\n  \n  console.log('✅ Generated proposal:', proposal.substring(0, 100) + '...');\n} catch (e) {\n  console.error('❌ Proposal generation error:', e);\n}\n\nreturn {\n  json: {\n    id: recordId,\n    fields: {\n      Proposal_Draft: proposal\n    }\n  }\n};"
+      },
+      "id": "2fc6030f-3b14-429e-b4e4-6ebcbd777d18",
+      "name": "Code - Add Proposal",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1024,
+        0
+      ]
+    },
+    {
+  "parameters": {
+    "operation": "update",
+    "base": {
+      "__rl": true,
+      "value": "app11EF1n6NDYH55O",
+      "mode": "id"
+    },
+    "table": {
+      "__rl": true,
+      "value": "Jobs",
+      "mode": "name"
+    },
+    "id": "={{ $json.id }}",
+    "columns": {
+      "mappingMode": "defineBelow",
+      "value": {
+        "Proposal_Draft": "={{ $json.fields.Proposal_Draft }}"
+      }
+    }
+  }
+},
+    {
+      "parameters": {
+        "chatId": "6223828455",
+        "text": "=🔥 *HIGH PRIORITY n8n JOB* ({{ $json.fields.Score }}/10)\n\n*{{ $json.fields.Title }}*\n\n💰 {{ $json.fields.Budget }}\n📅 {{ $json.fields.Posted }}\n\n✅ *Why it matches:*\n{{ $json.fields.Reason }}\n\n⚠️ *Red flags:*\n{{ $json.fields.Red_Flags }}\n\n🎯 *Type:* {{ $json.fields.Opportunity_Type }}\n\n[Apply Now]({{ $json.fields.Link }})\n\n---\n📝 *AI-generated proposal ready in Airtable*",
+        "additionalFields": {}
+      },
+      "id": "eedf4b96-8322-465f-867b-f4a2db5448b7",
+      "name": "Telegram - High Priority",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        800,
+        400
+      ],
+      "webhookId": "7165f02f-a9be-4780-9427-33a1aa39ff5f",
+      "credentials": {
+        "telegramApi": {
+          "id": "M2OEMeA8U9VS0gHY",
+          "name": "Telegram account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook - Chrome Extension": {
+      "main": [
+        [
+          {
+            "node": "Code - Parse Webhook Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Parse Webhook Data": {
+      "main": [
+        [
+          {
+            "node": "Airtable - Get All Records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Airtable - Get All Records": {
+      "main": [
+        [
+          {
+            "node": "Code - Filter Duplicates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Filter Duplicates": {
+      "main": [
+        [
+          {
+            "node": "IF - New Jobs Exist",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - New Jobs Exist": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Code - Merge Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Merge Data": {
+      "main": [
+        [
+          {
+            "node": "Airtable - Create Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Airtable - Create Record": {
+      "main": [
+        [
+          {
+            "node": "IF - High Priority",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - High Priority": {
+      "main": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Telegram - High Priority",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent1": {
+      "main": [
+        [
+          {
+            "node": "Code - Add Proposal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Add Proposal": {
+      "main": [
+        [
+          {
+            "node": "Airtable - Update Proposal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "f5af06b2ce552f605c03f75b144be39e30ee28e1badde720c2db0aa55ae0dbdc"
+  }
+}
